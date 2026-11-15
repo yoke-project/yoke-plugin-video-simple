@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 yoke-sdk = "=0.7.1"
-rscam = "0.5"
+rscam = { version = "0.5", features = ["no_wrapper"] }
 
 # A Plugin is a program of its own, never a member of a workspace around it.
 [workspace]
