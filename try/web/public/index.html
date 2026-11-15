@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>video-simple</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #f6f6f4; --fg: #1d1d1b; --muted: #6b6b66; --line: #d9d9d4; --bad: #b3261e; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #151514; --fg: #ededea; --muted: #9a9a94; --line: #2e2e2b; --bad: #f2b8b5; } }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+    main { max-width: 1320px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    p { margin: 0 0 12px; color: var(--muted); }
+    canvas { display: block; width: 100%; height: auto; background: #000; border: 1px solid var(--line); }
+    .bar { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 12px 0; font-variant-numeric: tabular-nums; }
+    .bar b { font-weight: 600; }
+    button { font: inherit; padding: 4px 12px; }
+    #state.bad { color: var(--bad); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>video-simple</h1>
+  <p>The frames of <code>video-simple/video.frames</code>, through the channel's binary WebSocket.</p>
+  <div class="bar">
+    <span id="state">attaching…</span>
+    <span id="format"></span>
+    <button id="toggle" disabled>Stop</button>
+  </div>
+  <canvas id="screen" width="1280" height="720"></canvas>
+  <div class="bar" id="stats"></div>
+</main>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>

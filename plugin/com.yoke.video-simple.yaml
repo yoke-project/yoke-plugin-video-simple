@@ -1,0 +1,17 @@
+manifest: 1
+id: com.yoke.video-simple
+protocol: 1
+needs:
+  - device:camera
+streams:
+  - id: video.frames
+    tolerates_loss: true
+queries:
+  - id: video.format
+capabilities:
+  - name: stream.video.frames.publish
+    governs:
+      stream: video.frames
+  - name: query.video.format.answer
+    governs:
+      query: video.format

@@ -1,0 +1,24 @@
+model: 1
+id: com.yoke.video-simple-try
+version: 0.1.0
+arch: x86_64
+core: '>=0.13.0'
+units:
+  video-simple:
+    bind:
+      camera: /dev/video0
+    kind: plugin
+    plugin: com.yoke.video-simple
+    digest: sha256:f5c8fd96f3ace80c2192ca635f598ffa58559b2920bd3e9289e8345eb12a66f5
+    exec: components/plugins/video-simple
+    args: ["--device", "${bind.camera}", "--format", "mjpeg", "--size", "640x480", "--fps", "30"]
+channels:
+  viewer:
+    transport: local
+    clients: single
+  web:
+    transport: http+ws
+    clients: multiple
+    address:
+      class: loopback
+      port: 47911

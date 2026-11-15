@@ -1,0 +1,9 @@
+plugin: 1
+id: com.yoke.video-simple
+language: rust
+program: video-simple
+manifest: plugin/com.yoke.video-simple.yaml
+build:
+  in: plugin/
+  run: cargo build --release --target "$YOKE_RUST_TARGET" && cp "target/$YOKE_RUST_TARGET/release/video-simple" "$YOKE_OUT/video-simple"
+architectures: [x86_64, aarch64]

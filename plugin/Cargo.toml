@@ -1,0 +1,13 @@
+[package]
+name = "video-simple"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+yoke-sdk = "=0.7.1"
+rscam = "0.5"
+
+# A Plugin is a program of its own, never a member of a workspace around it.
+[workspace]

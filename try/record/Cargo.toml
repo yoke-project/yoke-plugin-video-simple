@@ -1,0 +1,13 @@
+# The application's recorder: an interface client that takes video-simple's frames and writes them to a
+# file, measuring what arrived. It is the application's, not the Plugin's.
+[package]
+name = "record"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+yoke-sdk = "=0.7.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal"] }
+
+[workspace]
