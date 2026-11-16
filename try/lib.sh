@@ -1,7 +1,7 @@
 # Sourced by the scripts beside it: starts the application on a local Core with one camera setting,
 # grants what video-simple declares, and stops everything when the calling script exits.
 #
-#   start_app <mjpeg|yuyv> <WxH> <fps> [device]     sets $instance and exports YOKE_INSTANCE
+#   start_app <mjpeg|yuyv|synthetic> <WxH> <fps> [device]     sets $instance and exports YOKE_INSTANCE
 
 try_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 record="$try_dir/record/target/release/record"
@@ -27,17 +27,20 @@ provision_plugin() {
     mkdir -p "$(dirname "$carried")" "$try_dir/manifests"
     cp "$built" "$carried"
     cp "$try_dir/../plugin/com.yoke.video-simple.yaml" "$try_dir/manifests/"
-    yoke-compose set units.video-simple.digest "sha256:$(sha256sum "$carried" | cut -d' ' -f1)" --dir "$try_dir" > /dev/null
   fi
+  # Written at every run: the description kept in the repository names whatever was built last.
+  yoke-compose set units.video-simple.digest "sha256:$(sha256sum "$carried" | cut -d' ' -f1)" --dir "$try_dir" > /dev/null
 }
 
 start_app() {
   local format="$1" size="$2" fps="$3" device="${4:-/dev/video0}"
+  local source=camera
+  [[ "$format" == synthetic ]] && source=synthetic format=yuyv
   provision_plugin
   [[ -x "$record" ]] || cargo build --release --manifest-path "$try_dir/record/Cargo.toml"
   yoke-compose set units.video-simple.bind.camera "$device" --dir "$try_dir" > /dev/null
   yoke-compose set units.video-simple.args \
-    "[\"--device\", \"\${bind.camera}\", \"--format\", \"$format\", \"--size\", \"$size\", \"--fps\", \"$fps\"]" \
+    "[\"--device\", \"\${bind.camera}\", \"--format\", \"$format\", \"--source\", \"$source\", \"--size\", \"$size\", \"--fps\", \"$fps\"]" \
     --dir "$try_dir" > /dev/null
   run_log="$(mktemp)"
   yoke app run --from "$try_dir" > "$run_log" 2>&1 &

@@ -9,6 +9,9 @@
 //! - Each frame's payload is one image exactly as the camera gave it (a JPEG for `mjpeg`, packed YUYV
 //!   4:2:2 for `yuyv`); the question `video.format` says which, and at what size and rate.
 //! - The camera is open only while the stream flows: opened at its activation, closed when it stops.
+//! - `--source synthetic` reads no camera: it emits packed YUYV frames of the size and rate asked for,
+//!   drawn here, so that a frame larger than any the camera offers can be carried and measured.
+//! - The stream declares its largest frame, 4 MiB: a raw 1920x1080 image is 4 147 200 bytes.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,13 +23,15 @@ use yoke_sdk::plugin::{Capability, Declaration, Event, Object, Stream, start};
 
 const FRAMES: &str = "video.frames";
 const FORMAT: &str = "video.format";
+/// The largest payload `video.frames` carries: room for a raw YUYV image of 1920x1080.
+const MAX_FRAME: u64 = 4 * 1024 * 1024;
 
 /// What this Plugin says about itself: a camera it needs, one stream, one question.
 fn declaration() -> Declaration {
     Declaration {
         id: "com.yoke.video-simple".into(),
         needs: vec!["device:camera".into()],
-        streams: vec![Stream { id: FRAMES.into(), tolerates_loss: true, tolerates_reorder: false }],
+        streams: vec![Stream { id: FRAMES.into(), tolerates_loss: true, tolerates_reorder: false, max_frame: MAX_FRAME }],
         queries: vec![FORMAT.into()],
         capabilities: vec![
             Capability { name: "stream.video.frames.publish".into(), governs: Object::Stream(FRAMES.into()) },
@@ -42,6 +47,8 @@ struct Settings {
     device: String,
     /// `mjpeg` or `yuyv`.
     format: String,
+    /// `camera`, or `synthetic`: frames drawn here, always `yuyv`.
+    source: String,
     width: u32,
     height: u32,
     fps: u32,
@@ -49,13 +56,14 @@ struct Settings {
 
 impl Settings {
     fn from_args(args: impl Iterator<Item = String>) -> Result<Settings, String> {
-        let mut s = Settings { device: "/dev/video0".into(), format: "mjpeg".into(), width: 1280, height: 720, fps: 30 };
+        let mut s = Settings { device: "/dev/video0".into(), format: "mjpeg".into(), source: "camera".into(), width: 1280, height: 720, fps: 30 };
         let mut it = args;
         while let Some(flag) = it.next() {
             let mut value = || it.next().ok_or(format!("{flag} takes a value"));
             match flag.as_str() {
                 "--device" => s.device = value()?,
                 "--format" => s.format = value()?,
+                "--source" => s.source = value()?,
                 "--size" => {
                     let v = value()?;
                     let (w, h) = v.split_once('x').ok_or(format!("--size is WxH, not {v}"))?;
@@ -69,6 +77,19 @@ impl Settings {
         if s.format != "mjpeg" && s.format != "yuyv" {
             return Err(format!("--format is mjpeg or yuyv, not {}", s.format));
         }
+        if s.source != "camera" && s.source != "synthetic" {
+            return Err(format!("--source is camera or synthetic, not {}", s.source));
+        }
+        if s.source == "synthetic" {
+            s.format = "yuyv".into();
+            if s.width == 0 || s.height == 0 || s.fps == 0 {
+                return Err("--source synthetic takes a size and a rate above zero".into());
+            }
+            let size = 2 * s.width as u64 * s.height as u64;
+            if size > MAX_FRAME {
+                return Err(format!("a {}x{} frame is {size} bytes, above the {MAX_FRAME} the stream declares", s.width, s.height));
+            }
+        }
         Ok(s)
     }
 
@@ -79,8 +100,8 @@ impl Settings {
     /// The answer to `video.format`.
     fn json(&self) -> String {
         format!(
-            "{{\"schema\":1,\"format\":\"{}\",\"width\":{},\"height\":{},\"fps\":{}}}",
-            self.format, self.width, self.height, self.fps
+            "{{\"schema\":1,\"format\":\"{}\",\"width\":{},\"height\":{},\"fps\":{},\"source\":\"{}\"}}",
+            self.format, self.width, self.height, self.fps, self.source
         )
     }
 }
@@ -108,6 +129,9 @@ fn capture(s: &Settings, tx: mpsc::Sender<Captured>, dropped: Arc<AtomicU64>) ->
     let stop = Arc::new(AtomicBool::new(false));
     let (s, halt) = (s.clone(), stop.clone());
     std::thread::spawn(move || {
+        if s.source == "synthetic" {
+            return synthesise(&s, &tx, &halt, &dropped);
+        }
         let mut camera = match rscam::Camera::new(&s.device) {
             Ok(c) => c,
             Err(e) => {
@@ -146,6 +170,33 @@ fn capture(s: &Settings, tx: mpsc::Sender<Captured>, dropped: Arc<AtomicU64>) ->
     Capture { stop }
 }
 
+/// Draws packed YUYV frames at the rate asked for: a grey field with a bar that moves one column pair a
+/// frame, so that two frames differ and a viewer sees it move.
+fn synthesise(s: &Settings, tx: &mpsc::Sender<Captured>, halt: &AtomicBool, dropped: &AtomicU64) {
+    let (width, height) = (s.width as usize, s.height as usize);
+    let period = Duration::from_secs_f64(1.0 / s.fps as f64);
+    let mut due = Instant::now();
+    let mut n = 0usize;
+    while !halt.load(Ordering::Relaxed) {
+        let mut frame = vec![0x80u8; 2 * width * height];
+        let bar = (2 * n) % width.max(1);
+        for row in frame.chunks_exact_mut(2 * width) {
+            for x in bar..(bar + 16).min(width) {
+                row[2 * x] = 0xeb;
+            }
+        }
+        if let Err(mpsc::error::TrySendError::Full(_)) = tx.try_send(Captured::Frame(frame)) {
+            dropped.fetch_add(1, Ordering::Relaxed);
+        }
+        n += 1;
+        due += period;
+        match due.checked_duration_since(Instant::now()) {
+            Some(wait) => std::thread::sleep(wait),
+            None => due = Instant::now(),
+        }
+    }
+}
+
 /// What the unit has done since it last said so, for its log.
 #[derive(Default)]
 struct Window {
@@ -177,7 +228,11 @@ async fn main() {
     };
     let idle = format!(
         "ready: {} {}x{} at {} fps from {}",
-        settings.format, settings.width, settings.height, settings.fps, settings.device
+        settings.format,
+        settings.width,
+        settings.height,
+        settings.fps,
+        if settings.source == "synthetic" { "a synthetic source" } else { &settings.device }
     );
     let _ = unit.health(0, &idle).await;
     let (tx, mut rx) = mpsc::channel::<Captured>(4);
