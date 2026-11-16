@@ -6,6 +6,7 @@ needs:
 streams:
   - id: video.frames
     tolerates_loss: true
+    max_frame: 4194304
 queries:
   - id: video.format
 capabilities:

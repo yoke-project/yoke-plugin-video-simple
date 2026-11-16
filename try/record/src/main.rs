@@ -1,7 +1,11 @@
 //! record: takes video-simple's frames through a channel and writes them to a file, saying what arrived.
 //!
-//!   record --instance I --channel C [--unit U] [--out FILE] [--seconds N]
-//!   record [--unit U] [--out FILE] [--seconds N]          as a managed interface (YOKE_SOCKET)
+//!   record --instance I --channel C [--unit U] [--out FILE] [--seconds N] [--reads ring|socket]
+//!   record [--unit U] [--out FILE] [--seconds N] [--reads ring|socket]   as a managed interface (YOKE_SOCKET)
+//!
+//! `--reads ring` (the default) offers the Core the stream's shared ring, read here directly, and the
+//! stream socket where the stream is on no ring; `--reads socket` offers the stream socket alone, so the
+//! Core copies every frame to it. It says which of the two the Core answered with.
 //!
 //! It asks the unit's `video.format`, subscribes to `video.frames`, asks for the stream to flow, and
 //! writes every payload as it came: a `.mjpeg` plays with `ffplay -f mjpeg FILE`, a `.yuyv` with
@@ -13,7 +17,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use yoke_sdk::interface::{self, Attachment, Options};
+use yoke_sdk::interface::{self, Attachment, Options, Reads};
 
 const STREAM: &str = "video.frames";
 
@@ -22,10 +26,12 @@ struct Args {
     unit: String,
     out: Option<String>,
     seconds: u64,
+    reads: Vec<Reads>,
 }
 
 fn args() -> Result<Args, String> {
     let (mut instance, mut channel, mut unit, mut out, mut seconds) = (None, None, "video-simple".to_string(), None, 20);
+    let mut reads = vec![Reads::StreamSocket, Reads::SharedObject];
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or(format!("{flag} takes a value"));
@@ -35,6 +41,13 @@ fn args() -> Result<Args, String> {
             "--unit" => unit = value()?,
             "--out" => out = Some(value()?),
             "--seconds" => seconds = value()?.parse().map_err(|_| "--seconds takes a number".to_string())?,
+            "--reads" => {
+                reads = match value()?.as_str() {
+                    "ring" => vec![Reads::StreamSocket, Reads::SharedObject],
+                    "socket" => vec![Reads::StreamSocket],
+                    other => return Err(format!("--reads is ring or socket, not {other}")),
+                }
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -44,7 +57,7 @@ fn args() -> Result<Args, String> {
         (None, None) => interface::managed(getenv).map_err(|e| e.to_string())?,
         _ => return Err("--instance and --channel go together".into()),
     };
-    Ok(Args { address: path.to_string_lossy().into_owned(), unit, out, seconds })
+    Ok(Args { address: path.to_string_lossy().into_owned(), unit, out, seconds, reads })
 }
 
 fn now() -> u64 {
@@ -107,11 +120,17 @@ async fn run(args: &Args) -> Result<(), String> {
         None => None,
     };
     // Subscribed first, so the first frame the stream carries is the first this copy receives.
-    let mut delivery = attachment.subscribe_stream(&args.unit, STREAM).await.map_err(|e| format!("subscribe: {e}"))?;
+    let mut delivery = attachment
+        .subscribe_stream_reading(&args.unit, STREAM, &args.reads)
+        .await
+        .map_err(|e| format!("subscribe: {e}"))?;
     if !delivery.flowing {
         attachment.start_stream(&args.unit, STREAM).await.map_err(|e| format!("start: {e}"))?;
     }
-    eprintln!("record: subscribed to {}/{STREAM}, recording for {} s", args.unit, args.seconds);
+    eprintln!(
+        "record: subscribed to {}/{STREAM}, arriving on {}, recording for {} s",
+        args.unit, delivery.arrives, args.seconds
+    );
 
     let began = Instant::now();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(args.seconds);

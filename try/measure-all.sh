@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Measures every camera setting worth comparing on both delivery paths, and writes one table.
+# Measures every setting worth comparing on the three delivery paths, and writes one table.
 #
 # Usage: measure-all.sh [seconds] [results.md] [device]
 #
@@ -18,6 +18,8 @@ settings=(
   "yuyv 424x240 30"
   "yuyv 640x360 30"
   "yuyv 640x480 30"
+  "synthetic 1280x720 30"
+  "synthetic 1920x1080 30"
 )
 
 dynamic="$(v4l2-ctl -d "$device" -C exposure_dynamic_framerate 2>/dev/null | awk '{print $2}')"
@@ -31,11 +33,11 @@ trap restore EXIT
   echo "$(date -u +%Y-%m-%dT%H:%MZ) on $(uname -n), $(uname -r), $(yoke --version 2>/dev/null), ${seconds} s per run, $device."
   echo "\`net.core.wmem_default\` $(cat /proc/sys/net/core/wmem_default), \`wmem_max\` $(cat /proc/sys/net/core/wmem_max)."
   echo
-  echo "| Path | Setting | Emitted | Arrived | Lost | Latency (avg / worst) |"
-  echo "| --- | --- | --- | --- | ---: | --- |"
+  echo "| Path | Setting | Emitted | Arrived | Lost | Latency (avg / worst) | Core |"
+  echo "| --- | --- | --- | --- | ---: | --- | ---: |"
 } > "$results"
 
-for path in local web; do
+for path in direct local web; do
   for s in "${settings[@]}"; do
     read -r format size fps <<< "$s"
     echo "== $path $format $size $fps" >&2
@@ -48,7 +50,8 @@ for path in local web; do
     [[ "$fps_in" == 0.0\ fps* ]] && fps_in="" lost="" 
     latency="$(sed -nE 's/.*latency ([0-9.]+) ms average, ([0-9.]+) ms worst.*/\1 \/ \2 ms/p' <<< "$arrived")"
     [[ -z "$fps_in" ]] && latency=""
-    echo "| $path | $format $size @ $fps | ${emitted:-—} | ${fps_in:-**nothing**} | ${lost:-—} | ${latency:-—} |" >> "$results"
+    core="$(sed -nE 's/^core: ([0-9.]+%) of a CPU$/\1/p' <<< "$out" | tail -1)"
+    echo "| $path | $format $size @ $fps | ${emitted:-—} | ${fps_in:-**nothing**} | ${lost:-—} | ${latency:-—} | ${core:-—} |" >> "$results"
   done
 done
 echo >&2

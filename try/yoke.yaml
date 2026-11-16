@@ -2,7 +2,7 @@ model: 1
 id: com.yoke.video-simple-try
 version: 0.1.0
 arch: x86_64
-core: '>=0.13.0'
+core: '>=0.15.0'
 units:
   video-simple:
     bind:
