@@ -37,20 +37,25 @@ source "$root/try/lib.sh" # start_app, $record, and the trap that stops the appl
 trap 'stop_all; rm -rf "$work"' EXIT
 
 # std: yoke-plugin-video-simple:the-watch.01
-# The device a Manifest needs is bound though the synthetic source never opens it.
-start_app synthetic 1280x720 30 /dev/null > "$work/start.log" 2>&1 \
-  || finish "FAIL  $CASE — the application did not come up under $release: $(tail -n 3 "$work/start.log" | tr '\n' ' ')"
-for reads in ring socket; do
-  said="$("$record" --instance "$instance" --channel viewer --reads "$reads" --seconds 5 2>&1)" \
-    || finish "FAIL  $CASE — under $release, reading the $reads: $(tail -n 1 <<<"$said")"
-  line="$(grep -E '^record: [0-9.]+ s, ' <<<"$said" | tail -n 1)"
-  frames="$(sed -nE 's/^record: [0-9.]+ s, ([0-9]+) frames .*/\1/p' <<<"$line")"
-  largest="$(sed -nE 's/.* ([0-9]+) KB largest.*/\1/p' <<<"$line")"
-  (( ${frames:-0} >= 100 )) || finish "FAIL  $CASE — under $release, reading the $reads brought ${frames:-no} frames in 5 s: $line"
-  (( ${largest:-0} >= 1800 )) || finish "FAIL  $CASE — under $release, reading the $reads brought no frame of 1.8 MB: $line"
-  case "$reads" in
-    ring) grep -q 'arriving on shared' <<<"$said" || finish "FAIL  $CASE — under $release the ring was not handed to a reader that offered it" ;;
-    socket) grep -q 'arriving on stream_socket' <<<"$said" || finish "FAIL  $CASE — under $release the delivery was not a stream socket" ;;
-  esac
-done
-finish "pass  $CASE"
+probe() { # <release>; says why on a failure
+  local reads said line frames largest
+  # The device a Manifest needs is bound though the synthetic source never opens it.
+  start_app synthetic 1280x720 30 /dev/null > "$work/start.log" 2>&1 \
+    || { echo "the application did not come up under $1: $(tail -n 3 "$work/start.log" | tr '\n' ' ')"; return 1; }
+  for reads in ring socket; do
+    said="$("$record" --instance "$instance" --channel viewer --reads "$reads" --seconds 5 2>&1)" \
+      || { echo "under $1, reading the $reads: $(tail -n 1 <<<"$said")"; return 1; }
+    line="$(grep -E '^record: [0-9.]+ s, ' <<<"$said" | tail -n 1)"
+    frames="$(sed -nE 's/^record: [0-9.]+ s, ([0-9]+) frames .*/\1/p' <<<"$line")"
+    largest="$(sed -nE 's/.* ([0-9]+) KB largest.*/\1/p' <<<"$line")"
+    (( ${frames:-0} >= 100 )) || { echo "under $1, reading the $reads brought ${frames:-no} frames in 5 s: $line"; return 1; }
+    (( ${largest:-0} >= 1800 )) || { echo "under $1, reading the $reads brought no frame of 1.8 MB: $line"; return 1; }
+    case "$reads" in
+      ring) grep -q 'arriving on shared' <<<"$said" || { echo "under $1 the ring was not handed to a reader that offered it"; return 1; } ;;
+      socket) grep -q 'arriving on stream_socket' <<<"$said" || { echo "under $1 the delivery was not a stream socket"; return 1; } ;;
+    esac
+  done
+}
+
+# Called here and not in a substitution: the application it starts is this shell's to stop.
+if probe "$release" > "$work/why"; then finish "pass  $CASE"; else finish "FAIL  $CASE — $(cat "$work/why")"; fi
